@@ -36,8 +36,8 @@
  *	fuse is set, the system clock is prescaled by 8; therefore, we are setting
  *	the F_CPU at 1 MHz
  */
-#define F_CPU 1000000UL
-#define DEBUG 0
+#define F_CPU 8000000UL
+#define DEBUG 1
 
 #include <util/delay.h>
 #include <avr/io.h>	
