@@ -192,7 +192,8 @@ void initTimer()
 //	The hardware address is set at PD0-2
 //
 uint8_t hardwareAddress() {
-	return PIND & ~0b11111000;
+	return 0x20;
+	//return PIND & ~0b11111000;
 }
 
 void beginBurn() 
