@@ -246,10 +246,12 @@ typedef enum
 ********************************************************************************/
 
 static uint8_t                  slaveAddress;
+static uint8_t					capturedAddress;
 static volatile overflowState_t overflowState;
 
 
 static uint8_t          rxBuf[ TWI_RX_BUFFER_SIZE ];
+static uint8_t          adBuf[ TWI_RX_BUFFER_SIZE ];
 static volatile uint8_t rxHead;
 static volatile uint8_t rxTail;
 
@@ -384,7 +386,7 @@ usiTwiTransmitByte(
 
 uint8_t
 usiTwiReceiveByte(
-  void
+  uint8_t* pAddress
 )
 {
 
@@ -395,6 +397,7 @@ usiTwiReceiveByte(
   rxTail = ( rxTail + 1 ) & TWI_RX_BUFFER_MASK;
 
   // return data from the buffer.
+  *pAddress = adBuf[ rxTail ];
   return rxBuf[ rxTail ];
 
 } // end usiTwiReceiveByte
@@ -513,24 +516,30 @@ ISR( USI_OVERFLOW_VECTOR )
     // Address mode: check address and send ACK (and next USI_SLAVE_SEND_DATA) if OK,
     // else reset USI
     case USI_SLAVE_CHECK_ADDRESS:
-      if ( ( USIDR == 0 ) || ( ( USIDR >> 1 ) == slaveAddress) )
-      {
-         // callback
-         if(_onTwiDataRequest) _onTwiDataRequest();
-         if ( USIDR & 0x01 )
-        {
-          overflowState = USI_SLAVE_SEND_DATA;
-        }
-        else
-        {
-          overflowState = USI_SLAVE_REQUEST_DATA;
-        } // end if
-        SET_USI_TO_SEND_ACK( );
-      }
-      else
-      {
-        SET_USI_TO_TWI_START_CONDITION_MODE( );
-      }
+	  {
+		  uint8_t usidr = USIDR;
+		  uint8_t address = usidr >> 1;
+		  if ( ( usidr == 0 ) || (( address >= slaveAddress) && (address < (slaveAddress + ADDRESS_RANGE)) ))
+		  {
+			  // callback
+			  if(_onTwiDataRequest) _onTwiDataRequest();
+			  if ( usidr & 0x01 )
+			  {
+				  overflowState = USI_SLAVE_SEND_DATA;
+			  }
+			  else
+			  {
+				  overflowState = USI_SLAVE_REQUEST_DATA;
+			  } // end if
+
+			  capturedAddress = address;
+			  SET_USI_TO_SEND_ACK( );
+		  }
+		  else
+		  {
+			  SET_USI_TO_TWI_START_CONDITION_MODE( );
+		  }
+	  }
       break;
 
     // Master write data mode: check reply and goto USI_SLAVE_SEND_DATA if OK,
@@ -585,6 +594,7 @@ ISR( USI_OVERFLOW_VECTOR )
       // Not necessary, but prevents warnings
       rxHead = ( rxHead + 1 ) & TWI_RX_BUFFER_MASK;
       rxBuf[ rxHead ] = USIDR;
+	  adBuf[ rxHead ] = capturedAddress;
       // next USI_SLAVE_REQUEST_DATA
       overflowState = USI_SLAVE_REQUEST_DATA;
       SET_USI_TO_SEND_ACK( );
