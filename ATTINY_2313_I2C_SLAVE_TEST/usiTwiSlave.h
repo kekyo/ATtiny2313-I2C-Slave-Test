@@ -34,8 +34,6 @@ Change Activity:
 #ifndef _USI_TWI_SLAVE_H_
 #define _USI_TWI_SLAVE_H_
 
-
-
 /********************************************************************************
 
                                     includes

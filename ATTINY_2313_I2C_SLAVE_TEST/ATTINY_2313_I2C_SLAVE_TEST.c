@@ -70,57 +70,6 @@
 #define YIC     (1<<PA1)
 
 //
-//	OPCODES FOR OUR VIRTUAL DEVICE
-//
-
-#define I2C_INITIATE_BURN	0x10	//	stage 1 of the sequence
-#define I2C_CONFIRM_BURN	0x20	//	stage 2 of the sequence; followed by secret code
-#define I2C_CANCEL_BURN		0x30	//	cancel the process
-#define I2C_SET_BURN_DURATION 0x40	//	followed by duration in seconds
-#define I2C_CONFIRM_BURN_SECRET_CODE 0xCC	// this is the code that must be passed after I2C_CONFIRM_BURN
-#define I2C_ACKNOWLEDGE	0x7F	//	acknowledgment sent back to host after successfully confirming burn
-
-//
-//	FUNCTION PROTOTYPES
-//
-void initTimer();
-uint8_t hardwareAddress();
-void beginBurn();
-
-enum {
-	MODE_DEFAULT,
-	MODE_INITIATED,
-	MODE_BURN
-};
-typedef uint8_t AKDBurnMode;
-
-
-static void out_data(uint8_t address, uint8_t data)
-{
-	// Step1: Output addresses and assert CS.
-	PORTB |= address & 0x03;
-	// _delay_us(0.001);	// Setup >= 10ns.
-	PORTB &= ~YCS;
-
-	// Step2: Set direction to out and output data.
-	DDRD = YD0 | YD1 | YD2 | YD3 | YD4 | YD5 | YD6;
-	PORTD = data & 0x7f;
-	DDRB |= YD7;
-	PORTB = (PORTB & ~YD7) | (data >> (7 - 2));	// Must PB2
-
-	// Step3: Assert WR.
-	PORTB &= ~YWR;
-
-	// Step4: Finish.
-	_delay_us(0.1);		// Trigger width from assert CS >= 100ns.
-	PORTB |= YWR | YCS;
-	PORTD = 0;
-	DDRD = 0;
-	PORTB &= ~(YD7 | YA0 | YA1);
-	DDRB &= ~YD7;
-}
-
-//
 //	Initiate the timer/counter
 //
 //	We are using TIMER/COUNTER 1 in CTC mode
@@ -162,11 +111,67 @@ ISR(TIMER1_COMPA_vect)
 	//	don't increment second count if we're not burning
 }
 
+static void out_data(uint8_t address, uint8_t data)
+{
+	// Step1: Output addresses and assert CS.
+	uint8_t value = (PORTB & 0xfc) | (address & 0x03);
+	NOP;
+	PORTB = value;
+
+	// _delay_us(0.001);	// Setup >= 10ns.
+	NOP;
+
+	value = PORTB & ~YCS;
+	NOP;
+	PORTB = value;
+
+	// Step2: Set direction to out and output data.
+	DDRD = YD0 | YD1 | YD2 | YD3 | YD4 | YD5 | YD6;
+	PORTD = data & 0x7f;
+
+	value = DDRB | YD7;
+	NOP;
+	DDRB = value;
+
+	uint8_t v = (data & 0x80) ? YD7 : 0;
+	value = (PORTB & ~YD7) | v;	// Must PB2
+	NOP;
+	PORTB = value;
+
+	// Step3: Assert WR.
+	NOP;
+	value = PORTB & ~YWR;
+	NOP;
+	PORTB = value;
+
+	// Step4: Finish.
+	_delay_us(1);		// Trigger width from assert CS >= 100ns.
+	value = PORTB | YWR | YCS;
+	NOP;
+	PORTB = value;
+
+	PORTD = 0;
+	DDRD = 0;
+
+	value = PORTB & ~(YD7 | YA0 | YA1);
+	NOP;
+	PORTB = value;
+
+	value = DDRB & ~YD7;
+	NOP;
+	DDRB = value;
+
+	_delay_us(100);
+}
+
 //
 //	GLOBALS
 //
 int main(void)
 {
+	// Set high impedance for input mode.
+	MCUCR |= 0x80; 
+
 	//	setup PORTD data direction (PIND0-2 are the hardware address)
 	DDRD = 0;
 	PORTD = 0;
@@ -192,6 +197,18 @@ int main(void)
 	
   	// enable interrupts (must be there, i2c needs them!)
   	sei();
+
+	//while (1)
+	//{
+		//for (uint8_t address = 0; address < 2; address++)
+		//{
+			//for (uint16_t data = 0; data < 0x100; data++)
+			//{
+				//out_data(address, (uint8_t)data);
+			//}
+		//}
+	//}
+
 
   	// handle commands via I2C bus
   	while (1)
