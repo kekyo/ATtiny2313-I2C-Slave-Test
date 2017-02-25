@@ -11,7 +11,6 @@
  *	the F_CPU at 1 MHz
  */
 #define F_CPU 20000000UL
-#define DEBUG 1
 
 #include <util/delay.h>
 #include <avr/io.h>	
@@ -41,7 +40,8 @@
 #define YRD (1<<PB4)
 #define YCS (1<<PB6)
 
-#define YIC (1<<PA1)
+//#define YIC (1<<PA1)
+#define YIC (1<<PB4)
 
 //
 //	Initiate the timer/counter
@@ -79,9 +79,9 @@ uint8_t hardwareAddress() {
 ISR(TIMER1_COMPA_vect)
 {
 	//	pulse the PD3 pin every second for testing purposes
-	if( DEBUG ) {
+	//if( DEBUG ) {
 		PORTD ^= (1<<PD3);
-	}
+	//}
 	//	don't increment second count if we're not burning
 }
 
@@ -106,7 +106,7 @@ static void out_addressbus(bool ya0, bool ya1)
 	}
 	PORTB = value;
 
-	_delay_us(0.01);	// 10ns
+	_delay_us(0.1);	// 10ns
 	PORTB &= ~YCS;
 }
 
@@ -125,6 +125,8 @@ static void out_databus(uint8_t data)
 	{
 		PORTB &= ~YD7;
 	}
+
+	_delay_us(0.1);	// 10ns
 }
 
 static void trigger_wr_and_finish()
@@ -132,8 +134,11 @@ static void trigger_wr_and_finish()
 	PORTB &= ~YWR;
 	_delay_us(0.1);		// Trigger width from assert CS >= 100ns.
 
-	PORTB |= YWR | YCS;
-	_delay_us(0.01);	// 10ns
+	PORTB |= YWR;
+	_delay_us(0.1);	// Trigger width from assert CS >= 100ns.
+
+	PORTB |= YCS;
+	_delay_us(0.1);	// 10ns
 }
 
 static void cleanup_bus()
@@ -141,8 +146,8 @@ static void cleanup_bus()
 	PORTD = 0;
 	PORTB &= ~(YD7 | YA0 | YA1);
 
-	//DDRD = 0;
-	//DDRB &= ~YD7;
+	DDRD = 0;
+	DDRB &= ~YD7;
 }
 
 static uint8_t read_databus()
@@ -196,13 +201,15 @@ int main(void)
 	PORTB = YWR | YRD | YCS;
 
 	// PA
-	DDRA |= YIC;
+	//DDRA |= YIC;
 
 	// Do reset YM2151
-	PORTA = 0;
-	_delay_us(100);
-	PORTA = YIC;
-	_delay_us(100);
+	//PORTA &= ~YIC;
+	PORTB &= ~YIC;
+	_delay_us(1000);
+	//PORTA |= YIC;
+	PORTB |= YIC;
+	_delay_us(1000);
 	
 	//	obtain I2C address at PIND0-2
 	uint8_t slave_address = hardwareAddress();
