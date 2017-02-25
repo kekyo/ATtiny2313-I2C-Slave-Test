@@ -5,32 +5,6 @@
  *  Author: Owner
  */ 
 
-/***********************************************************************+/
-/| ATTiny2313 setup diagram	                                         |/
- |																								|
- |					---------	--																|
- |		Vcc ----|1		  20|----Vcc														|
- |	   HADDR0--|2		  19|----SCL														|
- |		HADDR1--|3		  18|----NC														|
- |	   NC------|4		  17|----SDA														|
- |		NC------|5		  16|----NC														|
- |		HADDR2--|6		  15|----NC														|
- |		1s sig--|7		  14|----NC														|
- |		NC------|8		  13|----NC														|
- |		NC------|9		  12|----BURN												   |
- |		GND-----|10		  11|----NC														|
- |				  ------------																|
- |																								|
- | Where HADDR0-2 is the hardware address that is read by the code at	   |
- |	startup.																					|
- |	BURN is the burn trigger.  This pin is set to logic level 1 to begin |
- |	the burn process, typically triggering a relay to complete the burn	|
- |	circuit.
- |	1s sig is a 1 second pulse meant only for debugging.  It will be		|
- |	disabled in production code.													   |
- ************************************************************************/
-
-//	Default clock speed
 /*
  *	The internal oscillator of the ATTiny2313 runs at 8 MHz.  If the CKDIV8
  *	fuse is set, the system clock is prescaled by 8; therefore, we are setting
@@ -48,26 +22,26 @@
 
 #define NOP asm("nop");				//	skip one clock cycle
 
-#define SDA     (1<<PB5)    //  I2C SDA
-#define SCL     (1<<PB7)    //  I2C SCL
+#define SDA (1<<PB5)    //  I2C SDA
+#define SCL (1<<PB7)    //  I2C SCL
 
-#define YD0     (1<<PD0)
-#define YD1     (1<<PD1)
-#define YD2     (1<<PD2)
-#define YD3     (1<<PD3)
-#define YD4     (1<<PD4)
-#define YD5     (1<<PD5)
-#define YD6     (1<<PD6)
-#define YD7     (1<<PB2)	// Must bit2
+#define YD0 (1<<PD0)
+#define YD1 (1<<PD1)
+#define YD2 (1<<PD2)
+#define YD3 (1<<PD3)
+#define YD4 (1<<PD4)
+#define YD5 (1<<PD5)
+#define YD6 (1<<PD6)
+#define YD7 (1<<PB0)
 
-#define YA0     (1<<PB0)	// Must bit0
-#define YA1     (1<<PB1)	// Must bit1
+#define YA0 (1<<PB1)
+#define YA1 (1<<PB2)
 
-#define YWR     (1<<PB3)
-#define YRD     (1<<PB4)
-#define YCS     (1<<PB6)
+#define YWR (1<<PB3)
+#define YRD (1<<PB4)
+#define YCS (1<<PB6)
 
-#define YIC     (1<<PA1)
+#define YIC (1<<PA1)
 
 //
 //	Initiate the timer/counter
@@ -111,57 +85,98 @@ ISR(TIMER1_COMPA_vect)
 	//	don't increment second count if we're not burning
 }
 
-static void out_data(uint8_t address, uint8_t data)
+static void out_addressbus(bool ya0, bool ya1)
 {
-	// Step1: Output addresses and assert CS.
-	uint8_t value = (PORTB & 0xfc) | (address & 0x03);
-	NOP;
+	uint8_t value = PORTB;
+	if (ya0)
+	{
+		value |= YA0;
+	}
+	else
+	{
+		value &= ~YA0;
+	}
+	if (ya1)
+	{
+		value |= YA1;
+	}
+	else
+	{
+		value &= ~YA1;
+	}
 	PORTB = value;
 
-	// _delay_us(0.001);	// Setup >= 10ns.
-	NOP;
+	_delay_us(0.01);	// 10ns
+	PORTB &= ~YCS;
+}
 
-	value = PORTB & ~YCS;
-	NOP;
-	PORTB = value;
-
-	// Step2: Set direction to out and output data.
+static void out_databus(uint8_t data)
+{
 	DDRD = YD0 | YD1 | YD2 | YD3 | YD4 | YD5 | YD6;
+	DDRB |= YD7;
+
 	PORTD = data & 0x7f;
 
-	value = DDRB | YD7;
-	NOP;
-	DDRB = value;
+	if (data & 0x80)
+	{
+		PORTB |= YD7;
+	}
+	else
+	{
+		PORTB &= ~YD7;
+	}
+}
 
-	uint8_t v = (data & 0x80) ? YD7 : 0;
-	value = (PORTB & ~YD7) | v;	// Must PB2
-	NOP;
-	PORTB = value;
+static void trigger_wr_and_finish()
+{
+	PORTB &= ~YWR;
+	_delay_us(0.1);		// Trigger width from assert CS >= 100ns.
 
-	// Step3: Assert WR.
-	NOP;
-	value = PORTB & ~YWR;
-	NOP;
-	PORTB = value;
+	PORTB |= YWR | YCS;
+	_delay_us(0.01);	// 10ns
+}
 
-	// Step4: Finish.
-	_delay_us(1);		// Trigger width from assert CS >= 100ns.
-	value = PORTB | YWR | YCS;
-	NOP;
-	PORTB = value;
-
+static void cleanup_bus()
+{
 	PORTD = 0;
-	DDRD = 0;
+	PORTB &= ~(YD7 | YA0 | YA1);
 
-	value = PORTB & ~(YD7 | YA0 | YA1);
-	NOP;
-	PORTB = value;
+	//DDRD = 0;
+	//DDRB &= ~YD7;
+}
 
-	value = DDRB & ~YD7;
-	NOP;
-	DDRB = value;
+static uint8_t read_databus()
+{
+	// Read sequence ignores address, so assert both.
+	PORTB &= ~(YRD | YCS);
+	_delay_us(0.1);		// Trigger width from assert CS >= 100ns.
 
-	_delay_us(100);
+	uint8_t data = PIND;
+	if (PINB & YD7)
+	{
+		data |= 0x80;
+	}
+	else
+	{
+		data &= ~0x80;
+	}
+
+	PORTB |= YRD | YCS;
+
+	return data;
+}
+
+static void out_ym2151(uint8_t address, uint8_t data)
+{
+	out_addressbus(false, false);	// /A0 /A1
+	out_databus(address);
+	trigger_wr_and_finish();
+
+	out_addressbus(true, false);	// A0 /A1
+	out_databus(data);
+	trigger_wr_and_finish();
+
+	cleanup_bus();
 }
 
 //
@@ -198,67 +213,34 @@ int main(void)
   	// enable interrupts (must be there, i2c needs them!)
   	sei();
 
-	//while (1)
-	//{
-		//for (uint8_t address = 0; address < 2; address++)
-		//{
-			//for (uint16_t data = 0; data < 0x100; data++)
-			//{
-				//out_data(address, (uint8_t)data);
-			//}
-		//}
-	//}
-
-
   	// handle commands via I2C bus
   	while (1)
   	{
-		  //	check if data is in the i2c receive buffer
-		  if( usiTwiDataInReceiveBuffer() )
-		  {
-			  //	the first byte in the stream is our opcode
-			  uint8_t address;
-			  uint8_t data = usiTwiReceiveByte(&address);
-			  address &= 0x01;
+		//	check if data is in the i2c receive buffer
+		if (!usiTwiDataInReceiveBuffer() )
+		{
+			NOP;
+			continue;
+		}
 
-			  out_data(address, data);
+		//	the first byte in the stream is our opcode
+		uint8_t address = usiTwiReceiveByte();
 
-			  //_delay_ms(25);
-			  //if( b == I2C_INITIATE_BURN )
-			  //{
-				  	//if request is to initiate burn, only initiate if we are in default mode
-				  	//otherwise, for safety, we drop back to default mode
-				  //_burn_mode = (_burn_mode == MODE_DEFAULT)?MODE_INITIATED:MODE_DEFAULT;				  
-			  //}	
-			  //else if( b == I2C_CANCEL_BURN )
-			  //{
-				  	//if the request is to cancel, always drop back to default mode
-				  //_burn_mode = MODE_DEFAULT;
-				  //PORTD &= ~BURN_TRIGGER;
-			  //}
-			  //else if( b == I2C_CONFIRM_BURN )
-			  //{
-				  	//if the request is to confirm, look for a second byte that has the 
-				  	//confirmation code.
-				  //uint8_t confirm_byte = usiTwiReceiveByte();
-				  //if( confirm_byte == I2C_CONFIRM_BURN_SECRET_CODE )
-				  //{
-					  //usiTwiTransmitByte(I2C_ACKNOWLEDGE);
-					  //_delay_ms(10);
-					  //_burn_mode = MODE_BURN;
-					  //beginBurn();
-				  //}					  					  
-			  //}	
-			  //else if( b == I2C_SET_BURN_DURATION )
-			  //{
-				  	//if the request if to set the burn duration, then look for the duration
-				  	//in seconds in the next byte
-				  //uint8_t duration_byte = usiTwiReceiveByte();
-				  //_burn_duration = duration_byte;
-			  //}			
-		 }  
-		 //	waste a cycle  	 
-		 NOP
+		uint16_t timeout = 1000;	// 1ms
+		while ((timeout > 0) && (!usiTwiDataInReceiveBuffer()))
+		{
+			_delay_us(1);
+			timeout--;
+		}
+
+		if (timeout == 0)
+		{
+			continue;
+		}
+
+		uint8_t data = usiTwiReceiveByte();
+		out_ym2151(address, data);
   	}
+
   	return 0;
 }

@@ -52,7 +52,7 @@ Change Activity:
 
 void    usiTwiSlaveInit( uint8_t );
 void    usiTwiTransmitByte( uint8_t );
-uint8_t usiTwiReceiveByte( uint8_t* );
+uint8_t usiTwiReceiveByte();
 bool    usiTwiDataInReceiveBuffer( void );
 void    (*_onTwiDataRequest)(void);
 bool    usiTwiDataInTransmitBuffer(void);
@@ -63,8 +63,6 @@ bool    usiTwiDataInTransmitBuffer(void);
                            driver buffer definitions
 
 ********************************************************************************/
-
-#define ADDRESS_RANGE 4
 
 // permitted RX buffer sizes: 1, 2, 4, 8, 16, 32, 64, 128 or 256
 
