@@ -37,8 +37,7 @@
 #define YA1 (1<<PB2)
 
 #define YWR (1<<PB3)
-#define YIC (1<<PB4)
-#define YCS (1<<PB6)
+#define YCS (1<<PB4)
 
 
 //
@@ -62,13 +61,11 @@ ISR(TIMER1_COMPA_vect)
 
 static void setup_bus()
 {
-	PORTD = 0;
-	PORTB &= ~(YD7 | YA0 | YA1);
+	//PORTD = 0;
+	//PORTB &= ~(YD7 | YA0 | YA1);
 
-	DDRD = YD0 | YD1 | YD2 | YD3 | YD4 | YD5 | YD6;
-	DDRB |= YD7;
-
-	//_delay_us(0.1);	// 10+10ns (TAS)
+	//DDRD = YD0 | YD1 | YD2 | YD3 | YD4 | YD5 | YD6;
+	//DDRB |= YD7;
 }
 
 static void out_addressbus(bool ya0, bool ya1)
@@ -82,8 +79,6 @@ static void out_addressbus(bool ya0, bool ya1)
 		PORTB &= ~YA0;
 	}
 
-	NOP;
-
 	if (ya1)
 	{
 		PORTB |= YA1;
@@ -92,8 +87,6 @@ static void out_addressbus(bool ya0, bool ya1)
 	{
 		PORTB &= ~YA1;
 	}
-
-	NOP;
 }
 
 static void out_databus(uint8_t data)
@@ -108,30 +101,37 @@ static void out_databus(uint8_t data)
 	{
 		PORTB &= ~YD7;
 	}
-
-	NOP;
 }
 
 static void trigger_wr_and_finish()
 {
-	_delay_us(0.5);	// 100+50ns (TCW)
+	_delay_us(0.01);	// 10ns (TCW)
 
-	PORTB &= ~(YWR | YCS);
-	_delay_us(0.5);	// 100+50ns (TWW)
+  	cli();
 
-	PORTB |= YWR | YCS;
-	_delay_us(0.5);	// 10+10ns (TDHW,TAH)
+	PORTB &= ~YCS;
+	_delay_us(0.10);	// 100ns (TCW)
+
+	PORTB &= ~YWR;
+	_delay_us(0.10);	// 100ns (TWW)
+
+	PORTB |= YWR;
+	_delay_us(0.01);	// 10ns (TDHW,TAH)
+
+	PORTB |= YCS;
+
+  	sei();
+
+	_delay_us(20);	// 20us (17us = 4MHz * 68bits) (High impedance)
 }
 
 static void cleanup_bus()
 {
-	DDRD = 0;
-	DDRB &= ~YD7;
-
-	PORTD = 0;
-	PORTB &= ~(YD7 | YA0 | YA1);
-
-	_delay_us(0.15);	// 50ns (High impedance)
+	//DDRD = 0;
+	//DDRB &= ~YD7;
+//
+	//PORTD = 0;
+	//PORTB &= ~(YD7 | YA0 | YA1);
 }
 
 static void out_ym2151(uint8_t address, uint8_t data)
@@ -158,20 +158,16 @@ int main(void)
 	MCUCR |= 0x80; 
 
 	//	setup PORTD data direction (PIND0-2 are the hardware address)
-	DDRD = 0;
-	PORTD = 0;
+	DDRD = YD0 | YD1 | YD2 | YD3 | YD4 | YD5 | YD6;
+	DDRB |= YD7;
 
 	//	PB0 is the burn trigger; so set the data direction register
-	DDRB |= YA0 | YA1 | YWR | YIC | YCS;
-	PORTB = YWR | YIC | YCS;
+	DDRB = YD7 | YA0 | YA1 | YWR | YCS;
+
+	PORTB |= YWR;
+	PORTB |= YCS;
 
 	_delay_us(100);
-
-	// Do reset YM2151
-	PORTB &= ~YIC;
-	_delay_us(1000);
-	PORTB |= YIC;
-	_delay_us(1000);
 	
 	//	obtain I2C address at PIND0-2
 	uint8_t slave_address = hardwareAddress();
@@ -195,7 +191,7 @@ int main(void)
 		//	the first byte in the stream is our opcode
 		uint8_t address = usiTwiReceiveByte();
 
-		uint16_t timeout = 1000;	// 1ms
+		uint16_t timeout = 10000;	// 1ms
 		while ((timeout > 0) && (!usiTwiDataInReceiveBuffer()))
 		{
 			_delay_us(1);
