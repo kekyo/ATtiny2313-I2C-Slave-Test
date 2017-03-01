@@ -1,15 +1,6 @@
 /*
- * ATTINY_2313_I2C_SLAVE_TEST.c
- *
- * Created: 11/28/2011 9:07:52 AM
- *  Author: Owner
  */ 
 
-/*
- *	The internal oscillator of the ATTiny2313 runs at 8 MHz.  If the CKDIV8
- *	fuse is set, the system clock is prescaled by 8; therefore, we are setting
- *	the F_CPU at 1 MHz
- */
 #define F_CPU 20000000UL
 
 #include <util/delay.h>
@@ -38,27 +29,8 @@
 
 #define YWR (1<<PB3)
 #define YRD (1<<PB4)
-#define YCS (1<<PA1)
-
-
-//
-//	Reads the hardware address of the device
-//
-//	The hardware address is set at PD0-2
-//
-uint8_t hardwareAddress() {
-	return 0x20;
-	//return PIND & ~0b11111000;
-}
-
-ISR(TIMER1_COMPA_vect)
-{
-	//	pulse the PD3 pin every second for testing purposes
-	//if( DEBUG ) {
-		PORTD ^= (1<<PD3);
-	//}
-	//	don't increment second count if we're not burning
-}
+#define YCS (1<<PB6)
+#define YIC (1<<PA1)
 
 static void setup_bus()
 {
@@ -107,7 +79,7 @@ static void trigger_wr_and_finish()
 
   	cli();
 
-	PORTA &= ~YCS;
+	PORTB &= ~YCS;
 	_delay_us(0.05);	// 50ns (TCW)
 
 	PORTB &= ~YWR;
@@ -116,22 +88,19 @@ static void trigger_wr_and_finish()
 	PORTB |= YWR;
 	_delay_us(0.01);	// 10ns (TDHW,TAH)
 
-	PORTA |= YCS;
-
-  	sei();
-
-	_delay_us(20);	// 20us (17us = 4MHz * 68bits) (High impedance)
-}
-
-static void cleanup_bus()
-{
-	DDRD = 0;
-	DDRB &= ~YD7;
+	PORTB |= YCS;
 
 	PORTD = 0;
 	PORTB &= ~YD7;
 	PORTB &= ~YA0;
 	PORTB &= ~YA1;
+
+	DDRD = 0;
+	DDRB &= ~YD7;
+
+  	sei();
+
+	_delay_us(20);	// 20us (17us = 4MHz * 68bits) (High impedance)
 }
 
 static void out_ym2151(uint8_t address, uint8_t data)
@@ -142,11 +111,11 @@ static void out_ym2151(uint8_t address, uint8_t data)
 	out_databus(address);
 	trigger_wr_and_finish();
 
+	setup_bus();
+
 	out_addressbus(true, false);	// A0 /A1
 	out_databus(data);
 	trigger_wr_and_finish();
-
-	cleanup_bus();
 }
 
 //
@@ -162,24 +131,24 @@ int main(void)
 	PORTD = 0;
 
 	//	PB0 is the burn trigger; so set the data direction register
-	DDRB = YD7 | YA0 | YA1 | YWR | YRD;
+	DDRB = YD7 | YA0 | YA1 | YWR | YRD | YCS;
 
 	PORTB |= YWR;
 	PORTB |= YRD;
+	PORTB |= YCS;
 	PORTB &= ~YD7;
 	PORTB &= ~YA0;
 	PORTB &= ~YA1;
 
-	DDRA |= YCS;
-	PORTA |= YCS;
+	DDRA |= YIC;
+	PORTA &= ~YIC;
 
-	_delay_us(100);
-	
-	//	obtain I2C address at PIND0-2
-	uint8_t slave_address = hardwareAddress();
+	_delay_us(10000);
+
+	PORTA |= YIC;
   	
 	// initialize as slave with our hardware address
-	usiTwiSlaveInit( slave_address );
+	usiTwiSlaveInit( 0x20 );
 	
   	// enable interrupts (must be there, i2c needs them!)
   	sei();
@@ -188,28 +157,21 @@ int main(void)
   	while (1)
   	{
 		//	check if data is in the i2c receive buffer
-		if (!usiTwiDataInReceiveBuffer() )
+		while (!usiTwiDataInReceiveBuffer())
 		{
 			NOP;
-			continue;
 		}
 
 		//	the first byte in the stream is our opcode
 		uint8_t address = usiTwiReceiveByte();
 
-		uint16_t timeout = 10000;	// 1ms
-		while ((timeout > 0) && (!usiTwiDataInReceiveBuffer()))
+		while (!usiTwiDataInReceiveBuffer())
 		{
-			_delay_us(1);
-			timeout--;
-		}
-
-		if (timeout == 0)
-		{
-			continue;
+			NOP;
 		}
 
 		uint8_t data = usiTwiReceiveByte();
+
 		out_ym2151(address, data);
   	}
 
