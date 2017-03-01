@@ -89,17 +89,52 @@ static void trigger_wr_and_finish()
 
 	PORTB |= YCS;
 
-	PORTD = 0;
-	PORTB &= ~YD7;
 	PORTB &= ~YA0;
 	PORTB &= ~YA1;
+
+	PORTD = 0;
+	PORTB &= ~YD7;
 
 	DDRD = 0;
 	DDRB &= ~YD7;
 
-  	sei();
+	PORTB |= YA0;
 
-	_delay_us(20);	// 20us (17us = 4MHz * 68bits) (High impedance)
+	_delay_us(0.01);	// 10ns (TAS)
+	PORTB &= ~YCS;
+
+	sei();
+
+	NOP;
+
+	while (1)
+	{
+		PORTB &= ~YRD;
+		_delay_us(0.18);	// 180ns (TACC)
+
+		uint8_t status = PIND;
+		if (PINB & YD7)
+		{
+			status |= 0x80;
+		}
+		else
+		{
+			status &= ~0x80;
+		}
+
+		PORTB |= YRD;
+
+		_delay_us(0.01);	// 10ns (TDHW,TAH)
+
+		// Is busy?
+		if (!(status & 0x80))
+		{
+			break;
+		}
+	}
+
+	PORTB |= YCS;
+	PORTB &= ~YA0;
 }
 
 static void out_ym2151(uint8_t address, uint8_t data)
