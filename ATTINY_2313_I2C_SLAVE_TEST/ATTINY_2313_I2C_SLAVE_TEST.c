@@ -37,7 +37,8 @@
 #define YA1 (1<<PB2)
 
 #define YWR (1<<PB3)
-#define YCS (1<<PB4)
+#define YRD (1<<PB4)
+#define YCS (1<<PA1)
 
 
 //
@@ -61,11 +62,8 @@ ISR(TIMER1_COMPA_vect)
 
 static void setup_bus()
 {
-	//PORTD = 0;
-	//PORTB &= ~(YD7 | YA0 | YA1);
-
-	//DDRD = YD0 | YD1 | YD2 | YD3 | YD4 | YD5 | YD6;
-	//DDRB |= YD7;
+	DDRD = YD0 | YD1 | YD2 | YD3 | YD4 | YD5 | YD6;
+	DDRB |= YD7;
 }
 
 static void out_addressbus(bool ya0, bool ya1)
@@ -109,8 +107,8 @@ static void trigger_wr_and_finish()
 
   	cli();
 
-	PORTB &= ~YCS;
-	_delay_us(0.10);	// 100ns (TCW)
+	PORTA &= ~YCS;
+	_delay_us(0.05);	// 50ns (TCW)
 
 	PORTB &= ~YWR;
 	_delay_us(0.10);	// 100ns (TWW)
@@ -118,7 +116,7 @@ static void trigger_wr_and_finish()
 	PORTB |= YWR;
 	_delay_us(0.01);	// 10ns (TDHW,TAH)
 
-	PORTB |= YCS;
+	PORTA |= YCS;
 
   	sei();
 
@@ -127,11 +125,13 @@ static void trigger_wr_and_finish()
 
 static void cleanup_bus()
 {
-	//DDRD = 0;
-	//DDRB &= ~YD7;
-//
-	//PORTD = 0;
-	//PORTB &= ~(YD7 | YA0 | YA1);
+	DDRD = 0;
+	DDRB &= ~YD7;
+
+	PORTD = 0;
+	PORTB &= ~YD7;
+	PORTB &= ~YA0;
+	PORTB &= ~YA1;
 }
 
 static void out_ym2151(uint8_t address, uint8_t data)
@@ -158,14 +158,20 @@ int main(void)
 	MCUCR |= 0x80; 
 
 	//	setup PORTD data direction (PIND0-2 are the hardware address)
-	DDRD = YD0 | YD1 | YD2 | YD3 | YD4 | YD5 | YD6;
-	DDRB |= YD7;
+	DDRD = 0;
+	PORTD = 0;
 
 	//	PB0 is the burn trigger; so set the data direction register
-	DDRB = YD7 | YA0 | YA1 | YWR | YCS;
+	DDRB = YD7 | YA0 | YA1 | YWR | YRD;
 
 	PORTB |= YWR;
-	PORTB |= YCS;
+	PORTB |= YRD;
+	PORTB &= ~YD7;
+	PORTB &= ~YA0;
+	PORTB &= ~YA1;
+
+	DDRA |= YCS;
+	PORTA |= YCS;
 
 	_delay_us(100);
 	
