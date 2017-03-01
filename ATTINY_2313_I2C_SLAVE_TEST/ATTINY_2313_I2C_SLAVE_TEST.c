@@ -61,6 +61,8 @@ static void out_addressbus(bool ya0, bool ya1)
 
 static void out_databus(uint8_t data)
 {
+	// Implicit delay 10ns (TAS)
+
 	PORTD = data & 0x7f;
 
 	if (data & 0x80)
@@ -75,15 +77,12 @@ static void out_databus(uint8_t data)
 
 static void trigger_wr_and_finish()
 {
-	_delay_us(0.01);	// 10ns (TCW)
-
   	cli();
 
 	PORTB &= ~YCS;
-	_delay_us(0.05);	// 50ns (TCW)
-
+	_delay_us(0.01);
 	PORTB &= ~YWR;
-	_delay_us(0.10);	// 100ns (TWW)
+	_delay_us(0.10);	// 100ns (TCW/TWW)
 
 	PORTB |= YWR;
 	_delay_us(0.01);	// 10ns (TDHW,TAH)
