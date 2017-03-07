@@ -1,43 +1,7 @@
 /*
- * ATTINY_2313_I2C_SLAVE_TEST.c
- *
- * Created: 11/28/2011 9:07:52 AM
- *  Author: Owner
  */ 
 
-/***********************************************************************+/
-/| ATTiny2313 setup diagram	                                         |/
- |																								|
- |					---------	--																|
- |		Vcc ----|1		  20|----Vcc														|
- |	   HADDR0--|2		  19|----SCL														|
- |		HADDR1--|3		  18|----NC														|
- |	   NC------|4		  17|----SDA														|
- |		NC------|5		  16|----NC														|
- |		HADDR2--|6		  15|----NC														|
- |		1s sig--|7		  14|----NC														|
- |		NC------|8		  13|----NC														|
- |		NC------|9		  12|----BURN												   |
- |		GND-----|10		  11|----NC														|
- |				  ------------																|
- |																								|
- | Where HADDR0-2 is the hardware address that is read by the code at	   |
- |	startup.																					|
- |	BURN is the burn trigger.  This pin is set to logic level 1 to begin |
- |	the burn process, typically triggering a relay to complete the burn	|
- |	circuit.
- |	1s sig is a 1 second pulse meant only for debugging.  It will be		|
- |	disabled in production code.													   |
-/************************************************************************/
-
-//	Default clock speed
-/*
- *	The internal oscillator of the ATTiny2313 runs at 8 MHz.  If the CKDIV8
- *	fuse is set, the system clock is prescaled by 8; therefore, we are setting
- *	the F_CPU at 1 MHz
- */
-#define F_CPU 8000000UL
-#define DEBUG 1
+#define F_CPU 20000000UL
 
 #include <util/delay.h>
 #include <avr/io.h>	
@@ -48,204 +12,202 @@
 
 #define NOP asm("nop");				//	skip one clock cycle
 
-#ifndef SDA 
-#define SDA             (1<<PB5)    //  I2C SDA
-#endif
+#define SDA (1<<PB5)    //  I2C SDA
+#define SCL (1<<PB7)    //  I2C SCL
 
-#ifndef SCL 
-#define SCL             (1<<PB7)    //  I2C SCL
-#endif
+#define YD0 (1<<PD0)
+#define YD1 (1<<PD1)
+#define YD2 (1<<PD2)
+#define YD3 (1<<PD3)
+#define YD4 (1<<PD4)
+#define YD5 (1<<PD5)
+#define YD6 (1<<PD6)
+#define YD7 (1<<PB0)
 
-#ifndef BURN_TRIGGER
-#define BURN_TRIGGER		(1<<PB0)		//	When this pin is high, the burn is turned on
-#endif
+#define YA0 (1<<PB1)
+#define YA1 (1<<PB2)
 
-#define DEFAULT_BURN_DURATION	2
+#define YWR (1<<PB3)
+#define YRD (1<<PB4)
+#define YCS (1<<PB6)
+#define YIC (1<<PA1)
 
-//
-//	OPCODES FOR OUR VIRTUAL DEVICE
-//
+static void out_addressbus(bool ya0, bool ya1)
+{
+	// Output addresses.
 
-#define I2C_INITIATE_BURN	0x10	//	stage 1 of the sequence
-#define I2C_CONFIRM_BURN	0x20	//	stage 2 of the sequence; followed by secret code
-#define I2C_CANCEL_BURN		0x30	//	cancel the process
-#define I2C_SET_BURN_DURATION 0x40	//	followed by duration in seconds
-#define I2C_CONFIRM_BURN_SECRET_CODE 0xCC	// this is the code that must be passed after I2C_CONFIRM_BURN
-#define I2C_ACKNOWLEDGE	0x7F	//	acknowledgment sent back to host after successfully confirming burn
+	if (ya0)
+	{
+		PORTB |= YA0;
+	}
+	else
+	{
+		PORTB &= ~YA0;
+	}
 
-//
-//	FUNCTION PROTOTYPES
-//
-void initTimer();
-uint8_t hardwareAddress();
-void beginBurn();
+	if (ya1)
+	{
+		PORTB |= YA1;
+	}
+	else
+	{
+		PORTB &= ~YA1;
+	}
+}
 
-enum {
-	MODE_DEFAULT,
-	MODE_INITIATED,
-	MODE_BURN
-};
-typedef uint8_t AKDBurnMode;
+static void wait_for_ready_last_written()
+{
+	// Waiting for last written data (trigger_wr_and_finish) busy bit.
+	// This place wants to settle last addresses YA0 and YA1.
+
+	// Assert YCS (10ns)
+	PORTB &= ~YCS;
+	_delay_us(0.01);
+
+	while (1)
+	{
+		// Assert YRD
+		PORTB &= ~YRD;
+		_delay_us(0.18);	// 180ns (TACC)
+
+		// Strict load all 8bits data from databus.
+		uint8_t status = PIND;
+		if (PINB & YD7)
+		{
+			status |= 0x80;
+		}
+		else
+		{
+			status &= ~0x80;
+		}
+
+		PORTB |= YRD;
+
+		_delay_us(0.01);	// 10ns (TDHW,TAH)
+
+		// Is busy? (bit7)
+		if (!(status & 0x80))
+		{
+			break;
+		}
+	}
+	
+	_delay_us(0.01);	// 10ns (TAS)
+
+	// Databus (YD) settle to output.
+	DDRD = YD0 | YD1 | YD2 | YD3 | YD4 | YD5 | YD6;
+	DDRB |= YD7;
+}
+
+static void out_databus(uint8_t data)
+{
+	// Implicit delay 10ns (TAS)
+
+	// 0..6bit
+	PORTD = data & 0x7f;
+
+	// 7bit
+	if (data & 0x80)
+	{
+		PORTB |= YD7;
+	}
+	else
+	{
+		PORTB &= ~YD7;
+	}
+}
+
+static void trigger_wr_and_finish()
+{
+	// Assert YWR (This place already asserted YCS)
+	PORTB &= ~YWR;
+	_delay_us(0.10);	// 100ns (TCW/TWW)
+
+	// Pulse sent to YWR
+	PORTB |= YWR;
+	_delay_us(0.01);	// 10ns (TDHW,TAH)
+
+	// Pulse sent to YCS
+	PORTB |= YCS;
+
+	// YD reset (For stablility databus)
+	PORTD = 0;
+	PORTB &= ~YD7;
+
+	// YD to high impedance.
+	DDRD = 0;
+	DDRB &= ~YD7;
+}
+
+static void out_ym2151(uint8_t address, uint8_t data)
+{
+	wait_for_ready_last_written();
+	out_addressbus(false, false);	// /A0 /A1
+	out_databus(address);
+	trigger_wr_and_finish();
+
+	wait_for_ready_last_written();
+	out_addressbus(true, false);	// A0 /A1
+	out_databus(data);
+	trigger_wr_and_finish();
+}
 
 //
 //	GLOBALS
 //
-uint16_t second_count;
-AKDBurnMode _burn_mode;
-uint8_t _burn_duration;
-
 int main(void)
 {
-	_burn_mode = MODE_DEFAULT;
-	_burn_duration = DEFAULT_BURN_DURATION;
-	second_count = 0;
-		
-	//	setup Timer/Counter1 (16bit) which we will use for intervals
-	initTimer();
-	
+	// Set high impedance for input mode.
+	MCUCR |= 0x80; 
+
 	//	setup PORTD data direction (PIND0-2 are the hardware address)
-	DDRD = 0b11111000;
+	DDRD = 0;
+	PORTD = 0;
+
 	//	PB0 is the burn trigger; so set the data direction register
-	DDRB |= BURN_TRIGGER;
-	//	we must not trigger a burn right now (don't want to drop the payload before takeoff!)
-	PORTB &= ~BURN_TRIGGER;
-	//	obtain I2C address at PIND0-2
-	uint8_t slave_address = hardwareAddress();
-  	// initialize as slave with our hardware address
-	usiTwiSlaveInit( slave_address );
+	DDRB = YD7 | YA0 | YA1 | YWR | YRD | YCS;
+
+	PORTB |= YWR;
+	PORTB |= YRD;
+	PORTB |= YCS;
+	PORTB &= ~YD7;
+	PORTB &= ~YA0;
+	PORTB &= ~YA1;
+
+	DDRA |= YIC;
+	PORTA &= ~YIC;
+
+	_delay_us(10000);
+
+	PORTA |= YIC;
+  	
+	// initialize as slave with our hardware address
+	usiTwiSlaveInit( 0x20 );
 	
   	// enable interrupts (must be there, i2c needs them!)
   	sei();
+
   	// handle commands via I2C bus
   	while (1)
   	{
-		  //	check if data is in the i2c receive buffer
-		  if( usiTwiDataInReceiveBuffer() )
-		  {
-			  //	the first byte in the stream is our opcode
-			  uint8_t b = usiTwiReceiveByte();
-			  _delay_ms(25);
-			  if( b == I2C_INITIATE_BURN )
-			  {
-				  //	if request is to initiate burn, only initiate if we are in default mode
-				  //	otherwise, for safety, we drop back to default mode
-				  _burn_mode = (_burn_mode == MODE_DEFAULT)?MODE_INITIATED:MODE_DEFAULT;				  
-			  }	
-			  else if( b == I2C_CANCEL_BURN )
-			  {
-				  //	if the request is to cancel, always drop back to default mode
-				  _burn_mode = MODE_DEFAULT;
-				  PORTD &= ~BURN_TRIGGER;
-			  }
-			  else if( b == I2C_CONFIRM_BURN )
-			  {
-				  //	if the request is to confirm, look for a second byte that has the 
-				  //	confirmation code.
-				  uint8_t confirm_byte = usiTwiReceiveByte();
-				  if( confirm_byte == I2C_CONFIRM_BURN_SECRET_CODE )
-				  {
-					  usiTwiTransmitByte(I2C_ACKNOWLEDGE);
-					  _delay_ms(10);
-					  _burn_mode = MODE_BURN;
-					  beginBurn();
-				  }					  					  
-			  }	
-			  else if( b == I2C_SET_BURN_DURATION )
-			  {
-				  //	if the request if to set the burn duration, then look for the duration
-				  //	in seconds in the next byte
-				  uint8_t duration_byte = usiTwiReceiveByte();
-				  _burn_duration = duration_byte;
-			  }			
-		 }  
-		 //	waste a cycle  	 
-		 NOP
+		//	check if data is in the i2c receive buffer
+		while (!usiTwiDataInReceiveBuffer())
+		{
+			NOP;
+		}
+
+		//	the first byte in the stream is our opcode
+		uint8_t address = usiTwiReceiveByte();
+
+		while (!usiTwiDataInReceiveBuffer())
+		{
+			NOP;
+		}
+
+		uint8_t data = usiTwiReceiveByte();
+
+		out_ym2151(address, data);
   	}
+
   	return 0;
 }
-
-//
-//	Initiate the timer/counter
-//	
-//	We are using TIMER/COUNTER 1 in CTC mode
-//	Target Timer Count = (Input Frequency / Prescale) / Target Frequency - 1
-// or, (10^6/64/1)-1 = 15624
-//
-void initTimer()
-{
-	 // Configure timer 1 for CTC mode
-   TCCR1B |= (1 << WGM12);
-   // Enable CTC interrupt 
-   TIMSK |= (1 << OCIE1A); 
-
-   //  Enable global interrupts 
-   sei(); 
-
-   // Set CTC compare value to 1Hz at 1MHz AVR clock, with a prescaler of 64
-   OCR1A   = 15624; 
-   // Start timer at Fcpu/64
-   TCCR1B |= ((1 << CS10) | (1 << CS11)); 
-}
-//	
-//	Reads the hardware address of the device
-//
-//	The hardware address is set at PD0-2
-//
-uint8_t hardwareAddress() {
-	return PIND & ~0b11111000;
-}
-
-void beginBurn() 
-{
-	PORTB |= BURN_TRIGGER;
-}
-
-ISR(TIMER1_COMPA_vect)
-{
-	//	pulse the PD3 pin every second for testing purposes
-	if( DEBUG ) {
-		PORTD ^= (1<<PD3);
-	}
-	//	don't increment second count if we're not burning
-	if( _burn_mode == MODE_BURN )
-	{
-		second_count++;
-		//	if we reach the end of the burn cycle, then turn off the relay
-		if( second_count >= _burn_duration )
-		{
-			second_count = 0;
-			_burn_mode = MODE_DEFAULT;
-			PORTB &= ~BURN_TRIGGER;
-		}
-	}
-}
-
-
-/*
-
-#include <avr/io.h>
-#include <avr/interrupt.h>
-
-int main (void)
-{
-   DDRB |= (1 << 0); // Set LED as output
-
-   TIMSK |= (1 << TOIE1); // Enable overflow interrupt
-   sei(); // Enable global interrupts
-
-   TCNT1 = 49911; // Preload timer with precalculated value
-
-   TCCR1B |= ((1 << CS10) | (1 << CS11)); // Set up timer at Fcpu/64
-
-   for (;;)
-   {
-
-   }
-}
-
-ISR(TIMER1_OVF_vect)
-{
-   PORTB ^= (1 << 0); // Toggle the LED
-   TCNT1  = 49911; // Reload timer with precalculated value
-} 
-*/

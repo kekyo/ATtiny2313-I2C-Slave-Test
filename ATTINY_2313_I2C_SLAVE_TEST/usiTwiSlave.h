@@ -34,8 +34,6 @@ Change Activity:
 #ifndef _USI_TWI_SLAVE_H_
 #define _USI_TWI_SLAVE_H_
 
-
-
 /********************************************************************************
 
                                     includes
@@ -54,7 +52,7 @@ Change Activity:
 
 void    usiTwiSlaveInit( uint8_t );
 void    usiTwiTransmitByte( uint8_t );
-uint8_t usiTwiReceiveByte( void );
+uint8_t usiTwiReceiveByte();
 bool    usiTwiDataInReceiveBuffer( void );
 void    (*_onTwiDataRequest)(void);
 bool    usiTwiDataInTransmitBuffer(void);
@@ -68,7 +66,7 @@ bool    usiTwiDataInTransmitBuffer(void);
 
 // permitted RX buffer sizes: 1, 2, 4, 8, 16, 32, 64, 128 or 256
 
-#define TWI_RX_BUFFER_SIZE  ( 16 )
+#define TWI_RX_BUFFER_SIZE  ( 128 )
 #define TWI_RX_BUFFER_MASK  ( TWI_RX_BUFFER_SIZE - 1 )
 
 #if ( TWI_RX_BUFFER_SIZE & TWI_RX_BUFFER_MASK )
@@ -77,7 +75,7 @@ bool    usiTwiDataInTransmitBuffer(void);
 
 // permitted TX buffer sizes: 1, 2, 4, 8, 16, 32, 64, 128 or 256
 
-#define TWI_TX_BUFFER_SIZE ( 16 )
+#define TWI_TX_BUFFER_SIZE ( 8 )
 #define TWI_TX_BUFFER_MASK ( TWI_TX_BUFFER_SIZE - 1 )
 
 #if ( TWI_TX_BUFFER_SIZE & TWI_TX_BUFFER_MASK )
