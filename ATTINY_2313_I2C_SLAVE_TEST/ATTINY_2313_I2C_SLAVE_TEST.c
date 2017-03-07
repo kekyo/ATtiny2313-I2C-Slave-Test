@@ -32,14 +32,10 @@
 #define YCS (1<<PB6)
 #define YIC (1<<PA1)
 
-static void setup_bus()
-{
-	DDRD = YD0 | YD1 | YD2 | YD3 | YD4 | YD5 | YD6;
-	DDRB |= YD7;
-}
-
 static void out_addressbus(bool ya0, bool ya1)
 {
+	// Output addresses.
+
 	if (ya0)
 	{
 		PORTB |= YA0;
@@ -59,59 +55,22 @@ static void out_addressbus(bool ya0, bool ya1)
 	}
 }
 
-static void out_databus(uint8_t data)
+static void wait_for_ready_last_written()
 {
-	// Implicit delay 10ns (TAS)
+	// Waiting for last written data (trigger_wr_and_finish) busy bit.
+	// This place wants to settle last addresses YA0 and YA1.
 
-	PORTD = data & 0x7f;
-
-	if (data & 0x80)
-	{
-		PORTB |= YD7;
-	}
-	else
-	{
-		PORTB &= ~YD7;
-	}
-}
-
-static void trigger_wr_and_finish()
-{
-  	cli();
-
+	// Assert YCS (10ns)
 	PORTB &= ~YCS;
 	_delay_us(0.01);
-	PORTB &= ~YWR;
-	_delay_us(0.10);	// 100ns (TCW/TWW)
-
-	PORTB |= YWR;
-	_delay_us(0.01);	// 10ns (TDHW,TAH)
-
-	PORTB |= YCS;
-
-	PORTB &= ~YA0;
-	PORTB &= ~YA1;
-
-	PORTD = 0;
-	PORTB &= ~YD7;
-
-	DDRD = 0;
-	DDRB &= ~YD7;
-
-	PORTB |= YA0;
-
-	_delay_us(0.01);	// 10ns (TAS)
-	PORTB &= ~YCS;
-
-	sei();
-
-	NOP;
 
 	while (1)
 	{
+		// Assert YRD
 		PORTB &= ~YRD;
 		_delay_us(0.18);	// 180ns (TACC)
 
+		// Strict load all 8bits data from databus.
 		uint8_t status = PIND;
 		if (PINB & YD7)
 		{
@@ -126,27 +85,68 @@ static void trigger_wr_and_finish()
 
 		_delay_us(0.01);	// 10ns (TDHW,TAH)
 
-		// Is busy?
+		// Is busy? (bit7)
 		if (!(status & 0x80))
 		{
 			break;
 		}
 	}
+	
+	_delay_us(0.01);	// 10ns (TAS)
 
+	// Databus (YD) settle to output.
+	DDRD = YD0 | YD1 | YD2 | YD3 | YD4 | YD5 | YD6;
+	DDRB |= YD7;
+}
+
+static void out_databus(uint8_t data)
+{
+	// Implicit delay 10ns (TAS)
+
+	// 0..6bit
+	PORTD = data & 0x7f;
+
+	// 7bit
+	if (data & 0x80)
+	{
+		PORTB |= YD7;
+	}
+	else
+	{
+		PORTB &= ~YD7;
+	}
+}
+
+static void trigger_wr_and_finish()
+{
+	// Assert YWR (This place already asserted YCS)
+	PORTB &= ~YWR;
+	_delay_us(0.10);	// 100ns (TCW/TWW)
+
+	// Pulse sent to YWR
+	PORTB |= YWR;
+	_delay_us(0.01);	// 10ns (TDHW,TAH)
+
+	// Pulse sent to YCS
 	PORTB |= YCS;
-	PORTB &= ~YA0;
+
+	// YD reset (For stablility databus)
+	PORTD = 0;
+	PORTB &= ~YD7;
+
+	// YD to high impedance.
+	DDRD = 0;
+	DDRB &= ~YD7;
 }
 
 static void out_ym2151(uint8_t address, uint8_t data)
 {
-	setup_bus();
-
+	wait_for_ready_last_written();
 	out_addressbus(false, false);	// /A0 /A1
 	out_databus(address);
 	trigger_wr_and_finish();
 
-	setup_bus();
-
+	wait_for_ready_last_written();
 	out_addressbus(true, false);	// A0 /A1
 	out_databus(data);
 	trigger_wr_and_finish();
